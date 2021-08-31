@@ -1,0 +1,121 @@
+version: '3.5'
+services:
+  mongo:
+    image: 'mongo'
+    container_name: 'pht-mongo'
+    volumes:
+      - ./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+      - "pht-mongo-data:/data/db"
+    ports: 
+      - 27017:27017
+    networks:
+      pht-net:
+        aliases:
+          - pht-mongo
+      metadata:
+        aliases:
+          - pht-mongo
+    restart: unless-stopped
+
+  dind:
+    image: 'smithpht/dind:stable-dind'
+    container_name: 'pht-dind'
+    environment:
+    - DOCKER_TLS_CERTDIR=/certs
+    - DOCKER_TLS_SAN=DNS:pht-dind
+    volumes:
+      - "pht-dind-certs-ca:/certs/ca"
+      - "pht-dind-certs-client:/certs/client"
+      - "pht-dind-data:/var/lib/docker"
+    networks:
+      pht-net:
+        aliases:
+          - pht-dind
+    privileged: true
+    restart: unless-stopped
+
+  pht-web:
+    image: 'registry.git.rwth-aachen.de/sascha.welten/pht-architecture/station-software:prerelease'
+    container_name: 'pht-web'
+    ports:
+      - "3030:3030"
+    volumes:
+      - "pht-dind-certs-client:/usr/src/app/dind-certs-client/certs:ro"
+      - "pht-vault-certs-client:/usr/src/app/vault-certs-client/certs:ro"
+    env_file:
+      - ./env
+    networks:
+      - pht-net
+      - metadata
+    depends_on: 
+      - mongo
+      - dind
+      - vault
+    restart: unless-stopped
+  vault:
+    # image: 'vault'
+    build: 
+      context: ./pht-vault
+      cache_from:
+        - vault:latest
+    image: vault:pht
+    container_name: 'pht-vault'
+    ports:
+      - "8200:8200"
+    environment:
+      - VAULT_ADDR=https://127.0.0.1:8200
+      - VAULT_API_ADDR=https://127.0.0.1:8200
+      - TLS_SAN=DNS:pht-vault
+    volumes:
+      - pht-vault-logs:/vault/logs
+      - pht-vault-data:/vault/data
+      - ./vault.json:/vault/config/vault.json
+      - "pht-vault-certs-ca:/certs/ca"
+      - "pht-vault-certs-client:/certs/client"
+    networks:
+      pht-net:
+        aliases:
+          - pht-vault
+    cap_add:
+      - IPC_LOCK
+    entrypoint: generate_cert.sh vault server -config=/vault/config/vault.json
+    restart: unless-stopped
+
+  telegraf:
+    image: telegraf
+    networks:
+      - metadata
+      - pht-net
+    volumes:
+      - "./telegraf.conf:/etc/telegraf/telegraf.conf"
+      - "pht-dind-certs-client:/certs:ro"
+    depends_on:
+      - dind
+  metadataservice:
+    image: "registry.git.rwth-aachen.de/sascha.welten/pht-architecture/phtmetadataprovider:latest"
+    networks: 
+      metadata:
+        aliases: 
+          - metadataservice
+    ports: 
+     - "9988:9988"
+    depends_on: 
+      - mongo
+networks:
+  pht-net:
+    external: false
+    name: pht-net
+  metadata:
+    external: false
+    name: metadata-net
+
+volumes:
+  pht-dind-certs-ca:
+  pht-dind-certs-client:
+  pht-dind-data:
+  pht-mongo-data:
+  pht-vault-logs:
+  pht-dind-data:
+  pht-vault-data:   
+  pht-vault-certs-ca:
+  pht-vault-certs-client: 
