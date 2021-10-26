@@ -35,7 +35,7 @@ services:
     restart: unless-stopped
 
   pht-web:
-    image: 'smithpht/station-software:latest'
+    image: 'smithpht/station-software:prerelease'
     container_name: 'pht-web'
     ports:
       - "3030:3030"
